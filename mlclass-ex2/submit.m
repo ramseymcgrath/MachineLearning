@@ -1,4 +1,4 @@
-function submit(partId)
+function submit(partId, webSubmit)
 %SUBMIT Submit your code and output to the ml-class servers
 %   SUBMIT() will connect to the ml-class server and submit your solution
 
@@ -7,7 +7,11 @@ function submit(partId)
   if ~exist('partId', 'var') || isempty(partId)
     partId = promptPart();
   end
-  
+
+  if ~exist('webSubmit', 'var') || isempty(webSubmit)
+    webSubmit = 0; % submit directly by default 
+  end
+
   % Check valid partId
   partNames = validParts();
   if ~isValidPartId(partId)
@@ -16,7 +20,7 @@ function submit(partId)
     fprintf('!! Submission Cancelled\n');
     return
   end
-  
+
   if ~exist('ml_login_data.mat','file')
     [login password] = loginPrompt();
     save('ml_login_data.mat','login','password');
@@ -25,7 +29,7 @@ function submit(partId)
     [login password] = quickLogin(login, password);
     save('ml_login_data.mat','login','password');
   end
-  
+
   if isempty(login)
     fprintf('!! Submission Cancelled\n');
     return
@@ -35,7 +39,7 @@ function submit(partId)
   if exist('OCTAVE_VERSION') 
     fflush(stdout);
   end
-  
+
   % Setup submit list
   if partId == numel(partNames) + 1
     submitParts = 1:numel(partNames);
@@ -45,88 +49,114 @@ function submit(partId)
 
   for s = 1:numel(submitParts)
     thisPartId = submitParts(s);
-    [login, ch, signature, auxstring] = getChallenge(login, thisPartId);
-    if isempty(login) || isempty(ch) || isempty(signature)
-      % Some error occured, error string in first return element.
-      fprintf('\n!! Error: %s\n\n', login);
-      return
-    end
+    if (~webSubmit) % submit directly to server
+      [login, ch, signature, auxstring] = getChallenge(login, thisPartId);
+      if isempty(login) || isempty(ch) || isempty(signature)
+        % Some error occured, error string in first return element.
+        fprintf('\n!! Error: %s\n\n', login);
+        return
+      end
 
-    % Attempt Submission with Challenge
-    ch_resp = challengeResponse(login, password, ch);
+      % Attempt Submission with Challenge
+      ch_resp = challengeResponse(login, password, ch);
 
-    [result, str] = submitSolution(login, ch_resp, thisPartId, ...
-           output(thisPartId, auxstring), source(thisPartId), signature);
+      [result, str] = submitSolution(login, ch_resp, thisPartId, ...
+             output(thisPartId, auxstring), source(thisPartId), signature);
 
-    partName = partNames{thisPartId};
+      partName = partNames{thisPartId};
 
-    fprintf('\n== [ml-class] Submitted Assignment %s - Part %d - %s\n', ...
-      homework_id(), thisPartId, partName);
-    fprintf('== %s\n', strtrim(str));
+      fprintf('\n== [ml-class] Submitted Assignment %s - Part %d - %s\n', ...
+        homework_id(), thisPartId, partName);
+      fprintf('== %s\n', strtrim(str));
 
-    if exist('OCTAVE_VERSION')
-      fflush(stdout);
+      if exist('OCTAVE_VERSION')
+        fflush(stdout);
+      end
+    else
+      [result] = submitSolutionWeb(login, thisPartId, output(thisPartId), ...
+                            source(thisPartId));
+      result = base64encode(result);
+
+      fprintf('\nSave as submission file [submit_ex%s_part%d.txt (enter to accept default)]:', ...
+        homework_id(), thisPartId);
+      saveAsFile = input('', 's');
+      if (isempty(saveAsFile))
+        saveAsFile = sprintf('submit_ex%s_part%d.txt', homework_id(), thisPartId);
+      end
+
+      fid = fopen(saveAsFile, 'w');
+      if (fid)
+        fwrite(fid, result);
+        fclose(fid);
+        fprintf('\nSaved your solutions to %s.\n\n', saveAsFile);
+        fprintf(['You can now submit your solutions through the web \n' ...
+                 'form in the programming exercises. Select the corresponding \n' ...
+                 'programming exercise to access the form.\n']);
+
+      else
+        fprintf('Unable to save to %s\n\n', saveAsFile);
+        fprintf(['You can create a submission file by saving the \n' ...
+                 'following text in a file: (press enter to continue)\n\n']);
+        pause;
+        fprintf(result);
+      end
     end
   end
-  
 end
 
 % ================== CONFIGURABLES FOR EACH HOMEWORK ==================
 
 function id = homework_id() 
-  id = '1';
+  id = '2';
 end
 
 function [partNames] = validParts()
-  partNames = { 'Warm up exercise ', ...
-                'Computing Cost (for one variable)', ...
-                'Gradient Descent (for one variable)', ...
-                'Feature Normalization', ...
-                'Computing Cost (for multiple variables)', ...
-                'Gradient Descent (for multiple variables)', ...
-                'Normal Equations'};
+  partNames = { 'Sigmoid Function ', ...
+                'Logistic Regression Cost', ...
+                'Logistic Regression Gradient', ...
+                'Predict', ...
+                'Regularized Logistic Regression Cost' ...
+                'Regularized Logistic Regression Gradient' ...
+                };
 end
 
 function srcs = sources()
   % Separated by part
-  srcs = { { 'warmUpExercise.m' }, ...
-           { 'computeCost.m' }, ...
-           { 'gradientDescent.m' }, ...
-           { 'featureNormalize.m' }, ...
-           { 'computeCostMulti.m' }, ...
-           { 'gradientDescentMulti.m' }, ...
-           { 'normalEqn.m' }, ...
-         };
+  srcs = { { 'sigmoid.m' }, ...
+           { 'costFunction.m' }, ...
+           { 'costFunction.m' }, ...
+           { 'predict.m' }, ...
+           { 'costFunctionReg.m' }, ...
+           { 'costFunctionReg.m' } };
 end
 
 function out = output(partId, auxstring)
   % Random Test Cases
-  X1 = [ones(20,1) (exp(1) + exp(2) * (0.1:0.1:2))'];
-  Y1 = X1(:,2) + sin(X1(:,1)) + cos(X1(:,2));
-  X2 = [X1 X1(:,2).^0.5 X1(:,2).^0.25];
-  Y2 = Y1.^0.5 + Y1;
+  X = [ones(20,1) (exp(1) * sin(1:1:20))' (exp(0.5) * cos(1:1:20))'];
+  y = sin(X(:,1) + X(:,2)) > 0;
   if partId == 1
-    out = sprintf('%0.5f ', warmUpExercise());
+    out = sprintf('%0.5f ', sigmoid(X));
   elseif partId == 2
-    out = sprintf('%0.5f ', computeCost(X1, Y1, [0.5 -0.5]'));
+    out = sprintf('%0.5f ', costFunction([0.25 0.5 -0.5]', X, y));
   elseif partId == 3
-    out = sprintf('%0.5f ', gradientDescent(X1, Y1, [0.5 -0.5]', 0.01, 10));
+    [cost, grad] = costFunction([0.25 0.5 -0.5]', X, y);
+    out = sprintf('%0.5f ', grad);
   elseif partId == 4
-    out = sprintf('%0.5f ', featureNormalize(X2(:,2:4)));
+    out = sprintf('%0.5f ', predict([0.25 0.5 -0.5]', X));
   elseif partId == 5
-    out = sprintf('%0.5f ', computeCostMulti(X2, Y2, [0.1 0.2 0.3 0.4]'));
+    out = sprintf('%0.5f ', costFunctionReg([0.25 0.5 -0.5]', X, y, 0.1));
   elseif partId == 6
-    out = sprintf('%0.5f ', gradientDescentMulti(X2, Y2, [-0.1 -0.2 -0.3 -0.4]', 0.01, 10));
-  elseif partId == 7
-    out = sprintf('%0.5f ', normalEqn(X2, Y2));
+    [cost, grad] = costFunctionReg([0.25 0.5 -0.5]', X, y, 0.1);
+    out = sprintf('%0.5f ', grad);
   end 
 end
+
 
 % ====================== SERVER CONFIGURATION ===========================
 
 % ***************** REMOVE -staging WHEN YOU DEPLOY *********************
 function url = site_url()
-  url = 'http://class.coursera.org/ml-004';
+  url = 'http://class.coursera.org/ml-003';
 end
 
 function url = challenge_url()
@@ -166,8 +196,7 @@ function ret = isValidPartId(partId)
 end
 
 function partId = promptPart()
-  fprintf('== Select which part(s) to submit:\n', ...
-          homework_id());
+  fprintf('== Select which part(s) to submit:\n');
   partNames = validParts();
   srcFiles = sources();
   for i = 1:numel(partNames)
@@ -201,6 +230,16 @@ function [email,ch,signature,auxstring] = getChallenge(email, part)
   auxstring = getfield(r, 'challenge_aux_data');
 end
 
+function [result, str] = submitSolutionWeb(email, part, output, source)
+
+  result = ['{"assignment_part_sid":"' base64encode([homework_id() '-' num2str(part)], '') '",' ...
+            '"email_address":"' base64encode(email, '') '",' ...
+            '"submission":"' base64encode(output, '') '",' ...
+            '"submission_aux":"' base64encode(source, '') '"' ...
+            '}'];
+  str = 'Web-submission';
+end
+
 function [result, str] = submitSolution(email, ch_resp, part, output, ...
                                         source, signature)
 
@@ -212,7 +251,7 @@ function [result, str] = submitSolution(email, ch_resp, part, output, ...
             'state', signature};
 
   str = urlread(submit_url(), 'post', params);
- 
+
   % Parse str to read for success / failure
   result = 0;
 
@@ -236,7 +275,8 @@ function [login password] = basicPrompt()
 end
 
 function [login password] = quickLogin(login,password)
-  cont_token = input(['You are currently logged in as ' login '.\nIs this you? (y/n - type n to reenter password)'],'s');
+  disp(['You are currently logged in as ' login '.']);
+  cont_token = input('Is this you? (y/n - type n to reenter password)','s');
   if(isempty(cont_token) || cont_token(1)=='Y'||cont_token(1)=='y')
     return;
   else
